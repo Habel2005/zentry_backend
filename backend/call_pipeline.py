@@ -3,7 +3,7 @@ import base64
 import json
 import logging
 from backend.vad_stream import VADStreamer
-from llm.main_llm_pipeline import handle_llm
+from llm.brain import handle_llm
 
 class CallPipeline:
     def __init__(self, uuid, phone, websocket, stt, tts):

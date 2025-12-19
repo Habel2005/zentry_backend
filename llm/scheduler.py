@@ -2,8 +2,8 @@
 import asyncio
 
 class LLMScheduler:
-    def __init__(self):
-        self.sem = asyncio.Semaphore(2)
+    def __init__(self, max_concurrent=2):
+        self.sem = asyncio.Semaphore(max_concurrent)
 
     async def run(self, fn, *args):
         async with self.sem:
