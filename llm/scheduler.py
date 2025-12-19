@@ -1,11 +1,10 @@
-
+# llm/scheduler.py
 import asyncio
 
 class LLMScheduler:
-    def __init__(self, max_concurrent=2):
-        self.sem = asyncio.Semaphore(max_concurrent)
+    def __init__(self):
+        self.sem = asyncio.Semaphore(2)
 
-    async def run(self, engine, prompt):
+    async def run(self, fn, *args):
         async with self.sem:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, engine.generate, prompt)
+            return await asyncio.to_thread(fn, *args)

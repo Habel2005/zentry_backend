@@ -3,78 +3,63 @@ import base64
 import json
 import logging
 from backend.vad_stream import VADStreamer
-
-# Assume 'stt' and 'tts' are passed in from main_server.py globally
-# from backend.stt_worker import MalayalamSTT
-# from tts.tts_module import TTSModule
+from llm.main_llm_pipeline import handle_llm
 
 class CallPipeline:
-    def __init__(self, uuid, websocket, stt_engine, tts_engine):
+    def __init__(self, uuid, phone, websocket, stt, tts):
         self.uuid = uuid
+        self.phone = phone
         self.ws = websocket
-        self.stt = stt_engine
-        self.tts = tts_engine
-        self.vad = VADStreamer(min_energy=400) # Tuned for phone mic
+        self.stt = stt
+        self.tts = tts
+        self.vad = VADStreamer(min_energy=400)
         self.current_task = None
         self.is_responding = False
 
     async def handle_audio(self, chunk):
         result = self.vad.process_chunk(chunk)
 
-        # 🛑 CASE 1: USER INTERRUPTED (Barge-In)
         if result == "BARGE_IN":
             if self.is_responding and self.current_task:
-                print(f"[{self.uuid}] 🛑 BARGE-IN DETECTED! Stopping AI...")
-                self.current_task.cancel() # Kill the LLM/TTS task immediately
-                # Optional: Send "stop" JSON to FreeSWITCH to clear its buffer
-                # await self.ws.send(json.dumps({"type": "stop"}))
+                print(f"[{self.uuid}] 🛑 Barge-in: Cancelling AI response")
+                self.current_task.cancel()
             return
 
-        # ✅ CASE 2: SENTENCE COMPLETED
         if isinstance(result, bytes):
-            # Start a background task for this turn
-            self.current_task = asyncio.create_task(self.run_conversation_turn(result))
+            # Run the AI turn in a task we can cancel if interrupted
+            self.current_task = asyncio.create_task(self.run_ai_turn(result))
 
-    async def run_conversation_turn(self, audio_bytes):
+    async def run_ai_turn(self, audio_bytes):
         self.is_responding = True
         try:
-            # 1. STT (Speech to Text)
-            text = await self.stt.transcribe(audio_bytes)
-            if not text or len(text) < 2: return
-            print(f"[{self.uuid}] 🗣️ User: {text}")
-
-            # 2. LLM (Get text response) -> REPLACE WITH YOUR LLM FUNC
-            # response_text = await llm.generate(text) 
-            response_text = f"നിങ്ങൾ പറഞ്ഞത് {text} എന്നല്ലേ?" # Echo back for testing
+            # 1. STT (Wait for shared GPU slot)
+            text_ml = await self.stt.transcribe(audio_bytes)
+            if not text_ml or len(text_ml) < 2: return
+            
+            # 2. THE BRAIN (Delegated to your LLM module)
+            # This handles: Translate -> Session -> RAG -> Phi-4 -> Translate Back
+            reply_ml = await handle_llm(self.phone, text_ml)
+            print(f"[{self.uuid}] 🤖 {reply_ml}")
 
             # 3. TTS (Text to Speech)
-            # Returns raw WAV bytes (16k, mono, 16-bit PCM)
-            audio_data = self.tts.tell(response_text) 
+            audio_data = self.tts.tell(reply_ml)
 
-            # 4. SEND TO FREESWITCH (Must be JSON Wrapped!)
-            # FreeSWITCH mod_audio_stream expects base64 inside JSON
-            b64_audio = base64.b64encode(audio_data).decode('utf-8')
-            
+            # 4. SEND (JSON Protocol for FreeSWITCH)
             payload = {
-                "type": "streamAudio", 
+                "type": "streamAudio",
                 "data": {
-                    "audioDataType": "raw",
-                    "sampleRate": 16000,
-                    "audioData": b64_audio
+                    "audioDataType": "raw", "sampleRate": 16000,
+                    "audioData": base64.b64encode(audio_data).decode('utf-8')
                 }
             }
-            
             await self.ws.send(json.dumps(payload))
-            print(f"[{self.uuid}] 🤖 AI Responded")
 
         except asyncio.CancelledError:
-            print(f"[{self.uuid}] 🔇 Task Cancelled (User Interrupted)")
+            pass # Task was killed by a barge-in
         except Exception as e:
             logging.error(f"Pipeline Error: {e}")
         finally:
             self.is_responding = False
-            self.current_task = None
 
     async def cleanup(self):
-        if self.current_task:
-            self.current_task.cancel()
+        if self.current_task: self.current_task.cancel()
