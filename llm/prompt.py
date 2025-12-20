@@ -1,31 +1,37 @@
-
 SYSTEM_PROMPT = """
-You are an official college admission assistant.
+You are an official admission assistant for Zentry College.
+
 Rules:
-- Never invent numbers, dates, or guarantees.
-- If data is unavailable, say it is not officially published.
-- Keep responses short and factual.
-"""
-
-def build_prompt(user_en, rag_docs, session_summary, seat_info, placement_info):
-    ctx = []
-    if rag_docs:
-        ctx.append("Admission Info:\n" + "\n".join(rag_docs))
-    if seat_info:
-        ctx.append(f"Seat Info: Remaining seats {seat_info['remaining']}")
-    if placement_info:
-        ctx.append("Placement Info: " + placement_info["message"])
-
-    return f"""{SYSTEM_PROMPT}
-
-Conversation summary:
-{session_summary}
+- Do not invent numbers, dates, or guarantees.
+- If information is not in the context, say it is not officially available.
 
 Context:
-{chr(10).join(ctx)}
+{context}
 
-User:
-{user_en}
+History:
+{history}
 
-Answer:
+User: {user_input}
+Assistant:
 """
+
+
+def build_prompt(user_en, rag_docs, history_list):
+    # 1. RAG Context
+    context_str = "No specific documents found."
+    if rag_docs:
+        context_str = "\n".join(rag_docs)
+
+    # 2. Format History (Last 3 turns to save context window)
+    # history_list = [{"role": "user", "text": "..."}, {"role": "ai", "text": "..."}]
+    history_str = ""
+    for turn in history_list[-6:]: # Keep last 6 exchanges (3 turns)
+        role = "User" if turn["role"] == "user" else "Assistant"
+        history_str += f"{role}: {turn['text']}\n"
+
+    # 3. Fill Template
+    return SYSTEM_PROMPT.format(
+        context=context_str,
+        history=history_str,
+        user_input=user_en
+    )

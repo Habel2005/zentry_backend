@@ -4,6 +4,8 @@ import signal
 from backend.audio_server import start_audio_server
 from backend.esl_client import run_esl_client
 from backend.stt_worker import MalayalamSTT
+from llm import brain
+from session.session_store import SessionStore
 from tts.tts_module import TTSModule
 
 # Global Shared Resources (Load Once)
@@ -30,6 +32,11 @@ if __name__ == "__main__":
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    # Initialize Memory
+    print("🧠 Initializing Memory...")
+    sessions = SessionStore(url="SUPABASE_URL", key="SUPABASE_KEY")
+    brain.init_globals(sessions)
     
     # 2. Define the tasks
     # Task A: WebSocket Server for Audio (Listens on 5001)
@@ -45,6 +52,7 @@ if __name__ == "__main__":
     loop.set_exception_handler(handle_exception)
 
     print("🚀 Zentry AI System Started. Waiting for calls...")
+
     try:
         loop.run_until_complete(asyncio.gather(audio_task, esl_task))
     except asyncio.CancelledError:
