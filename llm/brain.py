@@ -4,7 +4,7 @@ from llm.engine import PhiEngine
 from llm.scheduler import LLMScheduler
 from llm.guardrails import apply_guardrails
 from llm.prompt import build_prompt
-from llm.rag.rag import RAGRetriever
+from llm.rag.retriever import RAGRetriever
 from llm.translate import ml_to_en, en_to_ml
 from session.session_store import SessionStore
 
