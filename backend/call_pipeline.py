@@ -41,15 +41,19 @@ class CallPipeline:
             reply_ml = await handle_llm(self.phone, text_ml)
             print(f"[{self.uuid}] 🤖 {reply_ml}")
 
-            # 3. TTS (Text to Speech)
-            audio_data = self.tts.tell(reply_ml)
+            # 3. TTS
+            audio_data_np = await asyncio.to_thread(self.tts.tell, reply_ml, play=False)
 
-            # 4. SEND (JSON Protocol for FreeSWITCH)
+            # CONVERT NUMPY FLOAT32 -> PCM INT16 BYTES
+            audio_bytes = (audio_data_np * 32767).astype(np.int16).tobytes()
+
+            # 4. SEND
             payload = {
                 "type": "streamAudio",
                 "data": {
-                    "audioDataType": "raw", "sampleRate": 16000,
-                    "audioData": base64.b64encode(audio_data).decode('utf-8')
+                    "audioDataType": "raw", 
+                    "sampleRate": 16000,
+                    "audioData": base64.b64encode(audio_bytes).decode('utf-8') # Now this works
                 }
             }
             await self.ws.send(json.dumps(payload))

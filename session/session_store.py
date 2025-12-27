@@ -23,18 +23,18 @@ class SessionStore:
     def persist_later(self, phone):
         self.queue.put_nowait(phone)
 
+    # session/session_store.py (Update _sync_worker)
     async def _sync_worker(self):
         while True:
             phone = await self.queue.get()
             session = self.cache.get(phone)
-            if not session:
+            
+            # Only sync if supabase client exists
+            if not session or not hasattr(self, 'supabase') or not self.supabase:
                 continue
-
-            # run blocking Supabase call off-loop
+                
             await asyncio.to_thread(
-                self.supabase.table("sessions")
-                .upsert({"phone": phone, **session})
-                .execute
+                self.supabase.table("sessions").upsert({"phone": phone, **session}).execute
             )
 
     async def flush_all(self):

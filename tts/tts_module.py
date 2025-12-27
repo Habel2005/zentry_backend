@@ -10,6 +10,7 @@ class TTSModule:
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device == "cuda" else ["CPUExecutionProvider"]
         self.session = ort.InferenceSession(model_path, providers=providers)
 
+    # tts/tts_module.py (Update the tell method)
     def tell(self, text, play=True, sr=16000):
         inputs = self.tokenizer(text, return_tensors="np")
         ort_inputs = {"input_ids": inputs["input_ids"].astype(np.int64)}
@@ -17,6 +18,11 @@ class TTSModule:
         audio /= max(1e-5, abs(audio).max())
 
         if play:
-            sd.play(audio, sr)
-            sd.wait()
+            try:
+                # Only attempt to play if we are on a machine with audio
+                sd.play(audio, sr)
+                sd.wait()
+            except Exception:
+                pass # Silently fail on Colab/Server without speakers
+                
         return audio
