@@ -1,30 +1,27 @@
 # llm/rag/retriever.py
-from chromadb import Client, PersistentClient
+from llm.rag.store import get_chroma_client, get_collection
 
 class RAGRetriever:
     def __init__(self, embedder_instance, top_k=3):
         """
         Args:
-            embedder_instance: The shared Embedder object from brain.py
+            embedder_instance: The shared Embedder object from embedder.py
         """
-        # Connect to DB
-        client = PersistentClient(path="rag_db")
-        self.col = client.get_or_create_collection("admission")
+        # Use the helper from store.py for consistency
+        client = get_chroma_client() 
+        self.col = get_collection(client, name="admission")
         
-        # Store the shared model reference
         self.embedder = embedder_instance 
         self.top_k = top_k
 
     def retrieve(self, query, topic=None):
-        # 1. Use YOUR model to convert text -> numbers
-        # This uses the already loaded model in RAM (Fast!)
+        # 1. Embed query using the shared model
         query_vector = self.embedder.embed([query]) 
 
         # 2. Build Filter
         where = {"topic": topic} if topic else None
 
-        # 3. Query using EMBEDDINGS, not TEXTS
-        # This stops Chroma from loading its own model.
+        # 3. Query using EMBEDDINGS
         res = self.col.query(
             query_embeddings=query_vector, 
             n_results=self.top_k,

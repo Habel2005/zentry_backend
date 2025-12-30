@@ -16,6 +16,9 @@ You are the voice-based Admission Assistant for Zentry College. Your goal is to 
 ### CONTEXT
 {context}
 
+### OPERATIONAL NOTES
+{snapshot}
+
 ### RECENT CONVERSATION
 {history}
 
@@ -23,7 +26,7 @@ User: {user_input}
 Assistant (Short, verbal response):
 """
 
-def build_prompt(user_en, rag_docs, history_list):
+def build_prompt(user_en, rag_docs, history_list, snapshot):
     # 1. RAG Context - Keep it lean
     context_str = "\n".join(rag_docs) if rag_docs else "No specific context provided."
 
@@ -37,6 +40,7 @@ def build_prompt(user_en, rag_docs, history_list):
     # 3. Fill Template
     return SYSTEM_PROMPT.format(
         context=context_str,
+        snapshot=snapshot,
         history=history_str,
         user_input=user_en
     )

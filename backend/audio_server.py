@@ -2,6 +2,8 @@ import asyncio
 import websockets
 import json
 from .call_pipeline import CallPipeline
+from backend.call_context import CallContext
+from db.call_repo import start_call
 
 async def audio_handler(websocket, stt, tts):
     pipeline = None
@@ -11,7 +13,12 @@ async def audio_handler(websocket, stt, tts):
                 data = json.loads(message)
                 uuid, phone = data.get("uuid"), data.get("caller", "unknown")
                 if uuid:
-                    pipeline = CallPipeline(uuid, phone, websocket, stt, tts)
+                    
+                    #doing the context
+                    ctx = CallContext(uuid, phone)
+                    ctx.call_id, ctx.caller_id = start_call(uuid, phone)
+
+                    pipeline = CallPipeline(ctx, websocket, stt, tts)
                     print(f"✅ Stream Attached: {uuid}")
             elif isinstance(message, bytes) and pipeline:
                 await pipeline.handle_audio(message)

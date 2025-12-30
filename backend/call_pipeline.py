@@ -4,12 +4,14 @@ import json
 import logging
 from backend.vad_stream import VADStreamer
 from llm.brain import handle_llm
+from db.call_repo import log_message,end_call
 
 class CallPipeline:
-    def __init__(self, uuid, phone, websocket, stt, tts):
-        self.uuid = uuid
-        self.phone = phone
+    def __init__(self, ctx, websocket, stt, tts):
         self.ws = websocket
+        self.phone = self.ctx.phone
+        self.uuid = self.ctx.uuid
+        self.ctx = ctx
         self.stt = stt
         self.tts = tts
         self.vad = VADStreamer(min_energy=400)
@@ -35,10 +37,24 @@ class CallPipeline:
             # 1. STT (Wait for shared GPU slot)
             text_ml = await self.stt.transcribe(audio_bytes)
             if not text_ml or len(text_ml) < 2: return
+
+            log_message(
+                call_id=self.ctx.call_id,
+                speaker="user",
+                raw_text=text_ml
+            )
+
             
             # 2. THE BRAIN (Delegated to your LLM module)
             # This handles: Translate -> Session -> RAG -> Phi-4 -> Translate Back
-            reply_ml = await handle_llm(self.phone, text_ml)
+            reply_ml = await handle_llm(
+                self.ctx.call_id,
+                self.ctx.caller_id,
+                self.ctx.phone,
+                text_ml
+            )
+
+
             print(f"[{self.uuid}] 🤖 {reply_ml}")
 
             # 3. TTS
@@ -67,3 +83,4 @@ class CallPipeline:
 
     async def cleanup(self):
         if self.current_task: self.current_task.cancel()
+        end_call(self.ctx.call_id)
