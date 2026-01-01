@@ -14,7 +14,9 @@ class CallPipeline:
         self.ctx = ctx
         self.stt = stt
         self.tts = tts
-        self.vad = VADStreamer(min_energy=400)
+
+        # Initialize VAD with 8000Hz as per FreeSWITCH stream
+        self.vad = VADStreamer(sample_rate=8000, min_energy=400)
         self.current_task = None
         self.is_responding = False
 
@@ -35,7 +37,8 @@ class CallPipeline:
         self.is_responding = True
         try:
             # 1. STT (Wait for shared GPU slot)
-            text_ml = await self.stt.transcribe(audio_bytes)
+            # Pass 8000Hz so it knows to resample for Whisper
+            text_ml = await self.stt.transcribe(audio_bytes, sample_rate=8000)
             if not text_ml or len(text_ml) < 2: return
 
             log_message(

@@ -60,7 +60,8 @@ class ESLClient:
                 logging.info(f"📞 Call Answered: {uuid} -> Starting Audio Stream")
                 # Trigger mod_audio_stream to connect to OUR Python Audio Server
                 # We pass the UUID in the URL so audio_server knows who it is
-                cmd = f"api uuid_audio_stream {uuid} start ws://127.0.0.1:5001 mono 16k {{uuid={uuid}}}"
+                # [MODIFIED] Use 127.0.0.1 and 8000Hz as per 'light.py' success
+                cmd = f"api uuid_audio_stream {uuid} start ws://127.0.0.1:5001 mono 8000 {{uuid={uuid}}}"
                 await self.send_cmd(cmd)
 
             elif event_name == "CHANNEL_HANGUP_COMPLETE":
