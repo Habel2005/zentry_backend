@@ -32,7 +32,7 @@ def start_call(freeswitch_uuid: str, phone: str):
     call = sb.table("call_sessions").insert({
         "freeswitch_uuid": freeswitch_uuid,
         "phone_hash": phone_hash,
-        "status": "ongoing"
+        "call_status": "ongoing"
     }).execute()
 
     call_id = call.data[0]["id"]

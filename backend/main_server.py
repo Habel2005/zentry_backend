@@ -1,10 +1,10 @@
 import asyncio
 import logging
+import platform
 import signal
 from backend.audio_server import start_audio_server
 from backend.esl_client import run_esl_client
 from backend.stt_worker import MalayalamSTT
-from llm import brain
 from session.session_store import SessionStore
 from tts.tts_module import TTSModule
 
@@ -27,28 +27,34 @@ def handle_exception(loop, context):
 if __name__ == "__main__":
     # 1. Initialize Shared AI Models (Pass these to your servers)
     print("⏳ Loading AI Models (this may take 30s)...")
-    stt = MalayalamSTT("models/ct2-whisper-medium")
-    tts = TTSModule("models/mms-tts-mal.onnx")
+    stt = MalayalamSTT("models/whisper")
+    tts = TTSModule("models/tts/tts_mal.onnx")
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     # Initialize Memory
     print("🧠 Initializing Memory...")
-    sessions = SessionStore(url="SUPABASE_URL", key="SUPABASE_KEY")
-    brain.init_globals(sessions)
+    # sessions = SessionStore(url="SUPABASE_URL", key="SUPABASE_KEY")
+    # brain.init_globals(sessions)
     
     # 2. Define the tasks
     # Task A: WebSocket Server for Audio (Listens on 5001)
-    audio_task = start_audio_server(stt, tts, port=5001)
+    audio_task = start_audio_server(stt, tts)
     
     # Task B: ESL Client for Control (Connects to FS:8021)
     esl_task = run_esl_client(host="127.0.0.1", port=8021, password="ClueCon")
 
     # 3. Signals for graceful exit
-    signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
-    for s in signals:
-        loop.add_signal_handler(s, lambda s=s: asyncio.create_task(shutdown(loop, s)))
+    if platform.system() != "Windows":
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for s in signals:
+            loop.add_signal_handler(s, lambda s=s: asyncio.create_task(shutdown(loop, s)))
+    else:
+        # Windows doesn't support add_signal_handler for SIGINT/SIGTERM in the same way
+        # Most Windows users rely on the try/except KeyboardInterrupt block
+        print("ℹ️ Running on Windows: Use Ctrl+C to stop.")
+        
     loop.set_exception_handler(handle_exception)
 
     print("🚀 Zentry AI System Started. Waiting for calls...")

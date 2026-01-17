@@ -24,10 +24,10 @@ class Translator:
 
         for direction in directions:
             if direction == "ml-en":
-                model_name = "ai4bharat/indictrans2-indic-en-dist-200M"
+                model_name = "models/indictrans2"
                 src_lang, tgt_lang = "mal_Mlym", "eng_Latn"
             elif direction == "en-ml":
-                model_name = "ai4bharat/indictrans2-en-indic-dist-200M"
+                model_name = "models/en-indictrans2"
                 src_lang, tgt_lang = "eng_Latn", "mal_Mlym"
             else:
                 continue
