@@ -14,9 +14,6 @@ POST_MAP = {v: k for k, v in PRE_MAP.items()}
 
 class Translator:
     def __init__(self, directions=("ml-en", "en-ml")):
-        """
-        Loads distilled 200M models for high-concurrency translation.
-        """
         self.models = {}
         self.tokenizers = {}
         self.directions = directions
@@ -47,23 +44,20 @@ class Translator:
         print("✅ Translator initialized successfully on CPU.\n")
 
     def _pre_map(self, text: str, direction: str) -> str:
-        # Protect specific academic terms from being distorted by translation
         if direction == "ml-en":
             for k, v in PRE_MAP.items():
                 text = re.sub(rf"{re.escape(k)}[\u0D00-\u0D7F]*", v, text)
         return text
 
     def _post_map(self, text: str, direction: str) -> str:
-        # Restore Malayalam terms in the output
         if direction == "en-ml":
             for k, v in POST_MAP.items():
                 text = re.sub(re.escape(k), v, text)
-        return re.re.sub(r"<.*?>", "", text).strip()
+        
+        # [FIX 1] Corrected 're.re.sub' to 're.sub'
+        return re.sub(r"<.*?>", "", text).strip()
 
     def translate(self, text: str, direction="ml-en") -> str:
-        """
-        Translates a single utterance. Used by handle_llm in the brain logic.
-        """
         if direction not in self.models or not text.strip():
             return text
 
@@ -83,9 +77,10 @@ class Translator:
         with torch.no_grad():
             output_ids = model.generate(
                 **inputs,
-                max_new_tokens=128, # Increased for descriptive AI responses
-                num_beams=1,        # Beam=1 for maximum speed in production
-                do_sample=False
+                max_new_tokens=128,
+                num_beams=1,
+                do_sample=False,
+                use_cache=False  # [FIX 2] Critical: Disables KV cache to prevent 'NoneType' shape error
             )
 
         # 4. Post-processing

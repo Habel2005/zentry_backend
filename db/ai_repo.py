@@ -22,12 +22,3 @@ def log_intent(call_id, intent, confidence=None):
     }).execute()
 
 
-def log_interest(call_id, caller_id, program=None, quota=None, strength="medium"):
-    sb = init_supabase()
-    sb.table("interest_signals").insert({
-        "call_id": call_id,
-        "caller_id": caller_id,
-        "program_code": program,
-        "quota_type": quota,
-        "strength": strength
-    }).execute()

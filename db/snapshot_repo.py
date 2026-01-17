@@ -19,19 +19,6 @@ def get_snapshot(caller_id: str, intent: str):
     if caller.data and caller.data[0]["total_calls"] > 1:
         notes.append("Repeat caller. Previous enquiry exists.")
 
-    # 2. Recent strong interest
-    interest = sb.table("interest_signals") \
-        .select("strength, quota_type") \
-        .eq("caller_id", caller_id) \
-        .order("created_at", desc=True) \
-        .limit(1) \
-        .execute()
-
-    if interest.data:
-        strength = interest.data[0]["strength"]
-        quota = interest.data[0]["quota_type"]
-        if strength == "strong":
-            notes.append(f"High interest detected earlier ({quota} quota).")
 
     # 3. Admission baseline (VERY CAREFUL)
     baseline = sb.table("admission_baseline") \
