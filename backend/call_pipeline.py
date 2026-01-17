@@ -51,14 +51,16 @@ class CallPipeline:
             audio_data_np = await asyncio.to_thread(self.tts.tell, reply_ml, play=False, sr=8000)
             if audio_data_np is None or len(audio_data_np) == 0: return
 
-            # Convert to Int16 PCM
             audio_bytes_total = (audio_data_np * 32767).astype(np.int16).tobytes()
             
-            # [FIX] Increase Chunk Size to 1600 bytes (100ms) for stability
-            # 8000Hz * 16bit = 16000 bytes/sec
-            # 100ms = 1600 bytes
-            CHUNK_SIZE = 1600 
-            SLEEP_TIME = 0.1  # 100ms sleep
+            # [CRITICAL FIX] Standard VoIP Packet Size
+            # 8000Hz * 2 bytes = 16000 bytes/sec
+            # 20ms = 320 bytes (The standard chunk size for phone calls)
+            CHUNK_SIZE = 320 
+            
+            # Sleep slightly LESS than 0.02s to keep the buffer full and prevent stutter
+            # 0.018s sleep ensures we send data slightly faster than real-time
+            SLEEP_TIME = 0.018 
             
             print(f"📤 Streaming {len(audio_bytes_total)} bytes (Raw PCM 8k) to client...")
             

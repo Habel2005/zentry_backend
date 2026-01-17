@@ -70,7 +70,7 @@ class ESLClient:
                             # and the inner double quotes \" for JSON compatibility.
                             json_metadata = f'{{"uuid": "{uuid}", "caller": "{phone}"}}'
                             
-                            cmd = f"api uuid_audio_stream {uuid} start ws://127.0.0.1:5001 mono 8000 {json_metadata}"
+                            cmd = f"api uuid_audio_stream {uuid} start ws://127.0.0.1:5001 bidirectional 8000 {json_metadata}"
                             await self.send_cmd(cmd)
 
             elif event_name == "CHANNEL_HANGUP_COMPLETE":
