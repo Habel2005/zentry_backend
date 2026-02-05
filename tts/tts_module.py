@@ -27,10 +27,6 @@ class TTSModule:
             
             # Model generates 16000Hz natively
             audio = self.session.run(None, ort_inputs)[0].squeeze().astype(np.float32)
-            
-            # [FIX] Downsample 16k -> 8k
-            if sr == 8000:
-                audio = audio[::2] 
 
             # [FIX] Smart Normalization
             # If audio is silent (all zeros), max_val is 0.
