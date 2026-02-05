@@ -16,7 +16,7 @@ class CallPipeline:
         self.uuid = self.ctx.uuid
         self.stt = stt
         self.tts = tts
-        self.vad = VADStreamer(sample_rate=8000, threshold=0.4)
+        self.vad = VADStreamer(sample_rate=16000, threshold=0.4)
         self.current_task = None
         self.is_responding = False
 
