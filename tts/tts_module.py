@@ -11,7 +11,7 @@ class TTSModule:
         self.session = ort.InferenceSession(model_path, providers=providers)
         print(f"✅ TTS Module Loaded: {model_path}")
 
-    def tell(self, text, play=True, sr=8000): # Default to 8000 for Phone
+    def tell(self, text, play=True, sr=8000): 
         if not text or not text.strip():
             return np.zeros(sr, dtype=np.float32)
 
@@ -28,24 +28,24 @@ class TTSModule:
             # Model generates 16000Hz natively
             audio = self.session.run(None, ort_inputs)[0].squeeze().astype(np.float32)
             
-            # [FIX] Downsample to 8000Hz if requested (Simple Decimation)
+            # [FIX] Downsample 16k -> 8k
             if sr == 8000:
                 audio = audio[::2] 
 
-            # Normalize
+            # [FIX] Smart Normalization
+            # If audio is silent (all zeros), max_val is 0.
             max_val = abs(audio).max()
-            if max_val > 0:
-                audio = audio / max(1e-5, max_val)
+            
+            if max_val > 0.01: # Only normalize if there is actual audio
+                audio = audio / max_val
+
+            mean_val = abs(audio).mean()
+            if mean_val < 0.01:
+                print(f"⚠️ TTS WARNING: Audio is very quiet! (Mean: {mean_val:.4f})")
             
             # Debug Stats
-            print(f"🔊 TTS Gen ({sr}Hz): {len(audio)} samples, Max Amp: {max_val:.4f}")
+            print(f"🔊 TTS Gen ({sr}Hz): {len(audio)} samples, Peak Amp: {max_val:.4f}")
 
-            if play:
-                try:
-                    sd.play(audio, sr)
-                    sd.wait()
-                except Exception:
-                    pass
             return audio
 
         except Exception as e:
