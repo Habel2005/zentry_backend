@@ -9,6 +9,7 @@ class TTSModule:
         self.tokenizer = AutoTokenizer.from_pretrained("facebook/mms-tts-mal")
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device == "cuda" else ["CPUExecutionProvider"]
         self.session = ort.InferenceSession(model_path, providers=providers)
+        self.sr = 16000
         print(f"✅ TTS Module Loaded: {model_path}")
 
     def tell(self, text, play=True, sr=8000): 
