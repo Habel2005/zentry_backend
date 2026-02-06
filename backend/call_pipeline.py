@@ -5,6 +5,7 @@ import logging
 import traceback
 import numpy as np
 import time
+import audioop
 from backend.vad_stream import VADStreamer
 from llm.brain import handle_llm
 from db.call_repo import log_message, end_call
@@ -15,6 +16,7 @@ class CallPipeline:
         self.ws = websocket
         self.stt = stt
         self.tts = tts
+        self.is_twilio = False
         
         # [TUNED] 8kHz VAD settings
         self.vad = VADStreamer(sample_rate=8000, threshold=0.6, min_energy=0.015)
@@ -32,6 +34,25 @@ class CallPipeline:
         if isinstance(result, bytes):
             if len(result) > 4000: 
                 asyncio.create_task(self.execute_turn(result))
+
+    async def send_to_twilio(self, pcm_audio_bytes):
+        # 1. Convert 16k/8k PCM -> 8k Mu-law
+        # If your TTS is 16k, downsample first
+        if getattr(self.tts, 'sr', 8000) == 16000:
+            pcm_8k, _ = audioop.ratecv(pcm_audio_bytes, 2, 1, 16000, 8000, None)
+        else:
+            pcm_8k = pcm_audio_bytes
+
+        mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
+        payload = base64.b64encode(mulaw_data).decode('utf-8')
+
+        # 2. Twilio JSON wrapper
+        message = {
+            "event": "media",
+            "streamSid": self.ctx.uuid,
+            "media": {"payload": payload}
+        }
+        await self.ws.send_text(json.dumps(message))
 
     async def execute_turn(self, audio_bytes):
         if self.processing_lock.locked(): return
@@ -70,22 +91,28 @@ class CallPipeline:
                 audio_bytes_total = (audio_data_np * 32767).astype(np.int16).tobytes()
                 
                 # --- STREAMING ---
-                CHUNK_SIZE = 320 # 20ms @ 8kHz
-                
-                # [FIXED TIMING] Exact 20ms pacing
-                # 320 bytes / 16000 bytes/sec = 0.02 seconds
-                SLEEP_TIME = 0.02 
-                
                 print(f"📤 Streaming {len(audio_bytes_total)} bytes to phone...")
-                
-                for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
-                    chunk = audio_bytes_total[i:i+CHUNK_SIZE]
-                    try:
-                        await self.ws.send(chunk)
-                        await asyncio.sleep(SLEEP_TIME)
-                    except Exception as e:
-                        print(f"⚠️ Socket Dropped: {e}")
-                        break
+
+                if self.is_twilio:
+                    CHUNK_SIZE = 640 # 40ms of 8kHz PCM
+                    for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
+                        chunk = audio_bytes_total[i:i+CHUNK_SIZE]
+                        await self.send_to_twilio(chunk)
+                        await asyncio.sleep(0.04)
+                else:
+                    CHUNK_SIZE = 320 # 20ms @ 8kHz
+                    # [FIXED TIMING] Exact 20ms pacing
+                    # 320 bytes / 16000 bytes/sec = 0.02 seconds
+                    SLEEP_TIME = 0.02
+
+                    for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
+                        chunk = audio_bytes_total[i:i+CHUNK_SIZE]
+                        try:
+                            await self.ws.send(chunk)
+                            await asyncio.sleep(SLEEP_TIME)
+                        except Exception as e:
+                            print(f"⚠️ Socket Dropped: {e}")
+                            break
                 
                 print("✅ Turn Complete. Unlocking...")
 
