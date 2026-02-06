@@ -1,3 +1,31 @@
-wheel==0.45.1
+wheel
+# Core Server
 fastapi
 uvicorn
+python-dotenv
+python-multipart
+
+# Database
+supabase
+
+# Math & Data
+numpy
+torch
+
+# AI / ML
+transformers
+sentence-transformers
+faster-whisper
+llama-cpp-python
+onnxruntime-gpu
+
+# RAG
+chromadb
+PyPDF2
+langchain
+
+# Audio
+sounddevice
+
+# Translation (Install from Source)
+git+https://github.com/AI4Bharat/IndicTransToolkit.git

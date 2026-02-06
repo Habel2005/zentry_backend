@@ -94,7 +94,9 @@ class CallPipeline:
                 print(f"📤 Streaming {len(audio_bytes_total)} bytes to phone...")
 
                 if self.is_twilio:
-                    CHUNK_SIZE = 640 # 40ms of 8kHz PCM
+                    # Source is 16kHz (32000 bytes/s). We want 40ms chunks.
+                    # 0.04 * 32000 = 1280 bytes
+                    CHUNK_SIZE = 1280
                     for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
                         chunk = audio_bytes_total[i:i+CHUNK_SIZE]
                         await self.send_to_twilio(chunk)
