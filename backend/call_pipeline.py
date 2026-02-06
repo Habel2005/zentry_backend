@@ -19,7 +19,14 @@ class CallPipeline:
         self.is_twilio = False
         
         # [TUNED] 8kHz VAD settings
-        self.vad = VADStreamer(sample_rate=8000, threshold=0.6, min_energy=0.015)
+        # Note: Even though we upsample to 16k for STT, VAD might still be tuned for 8k or adaptable.
+        # Since we are passing 16k audio to handle_audio now (from twilio_server), we should probably
+        # ensure VAD expects 16k or we need to pass the original 8k chunk.
+        # The user instructions said: "3. Send clean 16k audio to VAD/STT".
+        # So we assume VADStreamer can handle 16k or we should update it.
+        # Looking at previous code, VADStreamer was init with sample_rate=8000.
+        # Let's update this to 16000 since we are upsampling.
+        self.vad = VADStreamer(sample_rate=16000, threshold=0.6, min_energy=0.015)
         self.processing_lock = asyncio.Lock()
 
     async def handle_audio(self, chunk):
@@ -36,22 +43,30 @@ class CallPipeline:
                 asyncio.create_task(self.execute_turn(result))
 
     async def send_to_twilio(self, pcm_audio_bytes):
-        # 1. Convert 16k/8k PCM -> 8k Mu-law
-        # If your TTS is 16k, downsample first
-        if getattr(self.tts, 'sr', 8000) == 16000:
-            pcm_8k, _ = audioop.ratecv(pcm_audio_bytes, 2, 1, 16000, 8000, None)
-        else:
-            pcm_8k = pcm_audio_bytes
+        """
+        Convert TTS Audio (Usually 22k/16k) -> 8k Mu-Law for Twilio
+        """
+        # Assume TTS output is 16000Hz (Based on TTSModule config)
+        in_rate = 16000
+        out_rate = 8000
 
+        # 1. Downsample (using audioop for speed)
+        # ratecv returns (new_bytes, state). We ignore state for single chunks or keep None
+        pcm_8k, _ = audioop.ratecv(pcm_audio_bytes, 2, 1, in_rate, out_rate, None)
+
+        # 2. Convert Linear PCM -> Mu-law
         mulaw_data = audioop.lin2ulaw(pcm_8k, 2)
+
+        # 3. Base64 Encode
         payload = base64.b64encode(mulaw_data).decode('utf-8')
 
-        # 2. Twilio JSON wrapper
+        # 4. JSON Packet
         message = {
             "event": "media",
             "streamSid": self.ctx.uuid,
             "media": {"payload": payload}
         }
+
         await self.ws.send_text(json.dumps(message))
 
     async def execute_turn(self, audio_bytes):
@@ -62,7 +77,8 @@ class CallPipeline:
                 print(f"\n🔒 Pipeline Locked. Processing {len(audio_bytes)} bytes...")
                 
                 # --- STT ---
-                text_ml = await self.stt.transcribe(audio_bytes, sample_rate=8000)
+                # Now receiving 16k audio, so ensure STT knows it
+                text_ml = await self.stt.transcribe(audio_bytes, sample_rate=16000)
                 
                 if not text_ml or len(text_ml.strip()) < 2: 
                     print("⚠️ Ignored empty STT.")
@@ -81,7 +97,8 @@ class CallPipeline:
 
                 # --- TTS ---
                 print("⏳ Generating TTS...")
-                audio_data_np = await asyncio.to_thread(self.tts.tell, reply_ml, play=False, sr=8000)
+                # TTS generates 16000Hz audio
+                audio_data_np = await asyncio.to_thread(self.tts.tell, reply_ml, play=False, sr=16000)
                 
                 if audio_data_np is None or len(audio_data_np) == 0:
                     print("❌ TTS Error: Empty audio.")
@@ -102,9 +119,8 @@ class CallPipeline:
                         await self.send_to_twilio(chunk)
                         await asyncio.sleep(0.04)
                 else:
-                    CHUNK_SIZE = 320 # 20ms @ 8kHz
-                    # [FIXED TIMING] Exact 20ms pacing
-                    # 320 bytes / 16000 bytes/sec = 0.02 seconds
+                    # Legacy/Debug socket path
+                    CHUNK_SIZE = 320
                     SLEEP_TIME = 0.02
 
                     for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
