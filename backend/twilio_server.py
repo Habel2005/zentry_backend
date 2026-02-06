@@ -1,12 +1,35 @@
 import json
 import base64
 import audioop
-from fastapi import FastAPI, WebSocket, Request
-from .call_pipeline import CallPipeline
+import numpy as np
+from fastapi import FastAPI, WebSocket
+from contextlib import asynccontextmanager
+
+# Import your modules
+from backend.call_pipeline import CallPipeline
 from backend.call_context import CallContext
 from db.call_repo import start_call
+from backend.stt_worker import MalayalamSTT
+from tts.tts_module import TTSModule
 
-app = FastAPI()
+# --- GLOBAL MODELS ---
+models = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load models ONCE when server starts
+    print("⏳ Loading AI Models...")
+    # Using 'cpu' to save VRAM for LLM as per codebase patterns,
+    # but the user mentioned being efficient.
+    # STT usually needs GPU for speed, TTS can be CPU/GPU.
+    # The existing code used "models/whisper" and "models/tts/tts_mal.onnx"
+    models["stt"] = MalayalamSTT("models/whisper")
+    models["tts"] = TTSModule("models/tts/tts_mal.onnx")
+    print("✅ AI Models Ready!")
+    yield
+    models.clear()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.websocket("/twilio/stream")
 async def twilio_stream(websocket: WebSocket):
@@ -14,15 +37,8 @@ async def twilio_stream(websocket: WebSocket):
     pipeline = None
     stream_sid = None
 
-    # Retrieve models from app state
-    # These will be set in main_server.py
-    stt_instance = getattr(websocket.app.state, "stt", None)
-    tts_instance = getattr(websocket.app.state, "tts", None)
-
-    if not stt_instance or not tts_instance:
-        print("❌ Error: STT/TTS models not initialized in app.state")
-        await websocket.close()
-        return
+    # State for upsampling (8k -> 16k)
+    upsample_state = None
 
     try:
         async for message in websocket.iter_text():
@@ -30,35 +46,38 @@ async def twilio_stream(websocket: WebSocket):
 
             if data['event'] == 'start':
                 stream_sid = data['start']['streamSid']
+                print(f"📞 Incoming Call: {stream_sid}")
+
+                # Setup Context
                 caller = data['start']['customParameters'].get('caller', 'unknown')
-
-                print(f"📞 Incoming Twilio Call: {stream_sid} from {caller}")
-
-                # Using your existing CallContext
                 ctx = CallContext(uuid=stream_sid, phone=caller)
 
                 # Initialize DB entry
                 ctx.call_id, ctx.caller_id = start_call(stream_sid, ctx.phone)
 
-                # Pass the FastAPI websocket to your pipeline
-                pipeline = CallPipeline(ctx, websocket, stt_instance, tts_instance)
-                pipeline.is_twilio = True # Mark as Twilio for format handling
-                print(f"✅ Twilio Stream Attached: {stream_sid}")
+                # Initialize Pipeline with Global Models
+                pipeline = CallPipeline(ctx, websocket, models["stt"], models["tts"])
+                pipeline.is_twilio = True
+                print(f"✅ Pipeline Attached: {stream_sid}")
 
             elif data['event'] == 'media' and pipeline:
-                # 1. Decode Base64
                 payload = data['media']['payload']
                 chunk_mulaw = base64.b64decode(payload)
 
-                # 2. Convert Mu-law (8kHz) -> PCM Linear (16-bit, 8kHz)
-                # Twilio audio is always 8000Hz.
-                chunk_pcm16 = audioop.ulaw2lin(chunk_mulaw, 2)
+                # 1. Decode Mu-law -> PCM 16-bit (still 8000Hz)
+                chunk_pcm_8k = audioop.ulaw2lin(chunk_mulaw, 2)
 
-                # 3. Process through your existing VAD
-                await pipeline.handle_audio(chunk_pcm16)
+                # 2. UPSAMPLE 8000Hz -> 16000Hz (Required for Whisper)
+                # ratecv(fragment, width, channels, in_rate, out_rate, state)
+                chunk_pcm_16k, upsample_state = audioop.ratecv(
+                    chunk_pcm_8k, 2, 1, 8000, 16000, upsample_state
+                )
+
+                # 3. Send clean 16k audio to VAD/STT
+                await pipeline.handle_audio(chunk_pcm_16k)
 
             elif data['event'] == 'stop':
-                print(f"🛑 Twilio Stream Stopped: {stream_sid}")
+                print(f"❌ Call Ended: {stream_sid}")
                 if pipeline: await pipeline.cleanup()
                 break
 
