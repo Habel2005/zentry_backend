@@ -1,6 +1,7 @@
 # llm/brain.py
 import asyncio
 import logging
+from pydoc import text
 from llm.intent import detect_intent, detector as shared_detector
 from llm.engine import PhiEngine
 from llm.scheduler import gpu_scheduler, cpu_scheduler
@@ -41,7 +42,12 @@ async def handle_llm(call_id, caller_id, phone, text_ml) -> str:
         history = []
 
     # STEP 1: Translate to English
-    text_en = await cpu_scheduler.run(ml_to_en, text_ml)
+    try:
+        text_en = ml_to_en(text_ml)
+    except Exception as e:
+        print("⚠️ Translation disabled:", e)
+        text_en = text_ml
+
     print(f"--- 🇺🇸 TRANSLATED (EN): {text_en} ---")
     log_processing_step(call_id, "translate_ml_en", text_ml, text_en)
 
@@ -84,3 +90,6 @@ async def handle_llm(call_id, caller_id, phone, text_ml) -> str:
     print(f"--- 🎙️ FINAL REPLY (ML): {reply_ml} ---\n")
     
     return reply_ml
+
+
+    

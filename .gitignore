@@ -1,3 +1,6 @@
 /.DS_Store
 /models
 */__pycache__
+*.pyc
+*.pyo
+zentry_backend/backend/__pycache__/
