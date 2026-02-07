@@ -18,15 +18,8 @@ class CallPipeline:
         self.tts = tts
         self.is_twilio = False
         
-        # [TUNED] 8kHz VAD settings
-        # Note: Even though we upsample to 16k for STT, VAD might still be tuned for 8k or adaptable.
-        # Since we are passing 16k audio to handle_audio now (from twilio_server), we should probably
-        # ensure VAD expects 16k or we need to pass the original 8k chunk.
-        # The user instructions said: "3. Send clean 16k audio to VAD/STT".
-        # So we assume VADStreamer can handle 16k or we should update it.
-        # Looking at previous code, VADStreamer was init with sample_rate=8000.
-        # Let's update this to 16000 since we are upsampling.
-        self.vad = VADStreamer(sample_rate=16000, threshold=0.6, min_energy=0.015)
+        # [TUNED] Lower threshold to 0.4 for Twilio Phone Audio
+        self.vad = VADStreamer(sample_rate=16000, threshold=0.2, min_energy=0.015)
         self.processing_lock = asyncio.Lock()
 
     async def handle_audio(self, chunk):

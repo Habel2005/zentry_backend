@@ -16,8 +16,8 @@ torch
 transformers
 sentence-transformers
 faster-whisper
-llama-cpp-python
-onnxruntime-gpu
+#llama-cpp-python
+#onnxruntime-gpu
 
 # RAG
 chromadb
@@ -28,4 +28,4 @@ langchain
 sounddevice
 
 # Translation (Install from Source)
-git+https://github.com/AI4Bharat/IndicTransToolkit.git
+IndicTransToolkit
