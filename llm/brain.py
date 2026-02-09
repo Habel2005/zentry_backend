@@ -56,9 +56,20 @@ async def handle_llm(call_id, caller_id, phone, text_ml) -> str:
     print(f"--- 🎯 INTENT: {intent.upper()} ---")
     log_intent(call_id, intent)
 
-    # STEP 3: RAG Retrieval
+    # STEP 3: RAG Retrieval (Hybrid Strategy)
     rag_topic = INTENT_TO_TOPIC.get(intent, None)
-    rag_docs = await cpu_scheduler.run(rag.retrieve, text_en, rag_topic)
+    
+    # A. Try specific topic first
+    rag_docs = []
+    if rag_topic:
+        print(f"🔍 Searching specific topic: {rag_topic}...")
+        rag_docs = await cpu_scheduler.run(rag.retrieve, text_en, rag_topic)
+
+    # B. Fallback: If no docs found (or intent was general), search EVERYTHING
+    if not rag_docs:
+        print(f"⚠️ No specific docs found. Expanding search to ALL topics...")
+        rag_docs = await cpu_scheduler.run(rag.retrieve, text_en, None) # None = No filter
+
     print(f"--- 📚 RAG FETCHED: {len(rag_docs)} context snippets ---")
     
     # STEP 4: LLM Generation
