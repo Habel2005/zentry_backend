@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import traceback
 import numpy as np
 import time
@@ -9,6 +10,27 @@ import audioop
 from backend.vad_stream import VADStreamer
 from llm.brain import handle_llm
 from db.call_repo import log_message, end_call
+
+# Load assets into RAM once (Global Cache)
+ASSETS = {}
+def load_assets():
+    if ASSETS: return
+    asset_dir = "assets"
+    if not os.path.exists(asset_dir):
+        os.makedirs(asset_dir)
+        print("⚠️ 'assets/' folder missing. Please create it and add .wav files.")
+        return
+
+    for filename in os.listdir(asset_dir):
+        if filename.endswith(".wav"):
+            # Load as raw bytes (assuming 16kHz PCM 16-bit Mono)
+            with open(os.path.join(asset_dir, filename), "rb") as f:
+                # Skip 44-byte WAV header to get raw PCM
+                data = f.read()[44:] 
+                ASSETS[filename.split(".")[0]] = data
+    print(f"✅ Loaded {len(ASSETS)} Reflex Audio Assets")
+
+load_assets()
 
 class CallPipeline:
     def __init__(self, ctx, websocket, stt, tts):
@@ -67,69 +89,48 @@ class CallPipeline:
         
         async with self.processing_lock:
             try:
-                print(f"\n🔒 Pipeline Locked. Processing {len(audio_bytes)} bytes...")
-                
-                # --- STT ---
-                # Now receiving 16k audio, so ensure STT knows it
+                # 1. STT
                 text_ml = await self.stt.transcribe(audio_bytes, sample_rate=16000)
-                
-                if not text_ml or len(text_ml.strip()) < 2: 
-                    print("⚠️ Ignored empty STT.")
-                    return
+                if not text_ml or len(text_ml.strip()) < 2: return
 
+                # Log User Input
                 log_message(call_id=self.ctx.call_id, speaker="user", raw_text=text_ml)
                 
-                # --- LLM ---
-                reply_ml = await handle_llm(
+                # 2. BRAIN (Returns Tuple)
+                # response_type: "text" | "reflex"
+                # content: Malayalam Text OR Asset Filename (e.g., "intro")
+                # log_text: English/Malayalam text for debug logs
+                response_type, content, log_text = await handle_llm(
                     self.ctx.call_id,
                     self.ctx.caller_id,
                     self.ctx.phone,
                     text_ml
                 )
-                if not reply_ml: return
-
-                # --- TTS ---
-                print("⏳ Generating TTS...")
-                # TTS generates 16000Hz audio
-                audio_data_np = await asyncio.to_thread(self.tts.tell, reply_ml, play=False, sr=16000)
                 
-                if audio_data_np is None or len(audio_data_np) == 0:
-                    print("❌ TTS Error: Empty audio.")
-                    return
+                if not content: return
 
-                # --- CONVERSION ---
-                audio_bytes_total = (audio_data_np * 32767).astype(np.int16).tobytes()
+                # 3. EXECUTION
+                if response_type == "reflex":
+                    print(f"⚡ REFLEX ACTIVATE: Playing {content}.wav")
+                    await self.play_asset(content) # Defined in previous turn
                 
-                # --- STREAMING ---
-                print(f"📤 Streaming {len(audio_bytes_total)} bytes to phone...")
+                else:
+                    print(f"⏳ Generating TTS for: {log_text[:20]}...")
+                    # TTS
+                    audio_data_np = await asyncio.to_thread(self.tts.tell, content, play=False, sr=16000)
+                    
+                    if audio_data_np is None: return
 
-                if self.is_twilio:
-                    # Source is 16kHz (32000 bytes/s). We want 40ms chunks.
-                    # 0.04 * 32000 = 1280 bytes
+                    # Stream
+                    audio_bytes_total = (audio_data_np * 32767).astype(np.int16).tobytes()
                     CHUNK_SIZE = 1280
                     for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
                         chunk = audio_bytes_total[i:i+CHUNK_SIZE]
                         await self.send_to_twilio(chunk)
                         await asyncio.sleep(0.04)
-                else:
-                    # Legacy/Debug socket path
-                    CHUNK_SIZE = 320
-                    SLEEP_TIME = 0.02
-
-                    for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
-                        chunk = audio_bytes_total[i:i+CHUNK_SIZE]
-                        try:
-                            await self.ws.send(chunk)
-                            await asyncio.sleep(SLEEP_TIME)
-                        except Exception as e:
-                            print(f"⚠️ Socket Dropped: {e}")
-                            break
-                
-                print("✅ Turn Complete. Unlocking...")
 
             except Exception as e:
                 logging.error(f"Pipeline Error: {e}")
-                traceback.print_exc()
 
     async def cleanup(self):
         print(f"🧹 Cleaning up call {self.ctx.call_id}...")
