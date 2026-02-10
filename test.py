@@ -1,2 +1,3 @@
-from llama_cpp import llama_backend
-print(llama_backend())
+import torch
+print(torch.cuda.device_count())
+print(torch.cuda.get_device_name(0))
