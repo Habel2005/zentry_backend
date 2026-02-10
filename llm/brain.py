@@ -14,7 +14,7 @@ from llm.translate import ml_to_en, en_to_ml
 from db.call_repo import log_message
 from db.ai_repo import log_processing_step, log_intent
 from db.snapshot_repo import get_snapshot
-from zentry_backend.db.client import init_supabase
+from db.client import init_supabase
 
 # Initialize Singletons
 engine = PhiEngine("models/llm/Phi-4-mini-instruct-Q5_K_M.gguf")
