@@ -3,4 +3,10 @@
 */__pycache__
 *.pyc
 *.pyo
-zentry_backend/backend/__pycache__/
+db/.env
+backend/_pycache_/
+data/ragQA.docx
+rag_training_data.pdf
+rag_db/
+test.py
+data/
