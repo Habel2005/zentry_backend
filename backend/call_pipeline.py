@@ -115,6 +115,7 @@ class CallPipeline:
         except Exception as e:
             print(f"⚠️ Asset Playback Error: {e}")
 
+
     async def execute_turn(self, audio_bytes):
         if self.processing_lock.locked(): return
         
@@ -122,16 +123,24 @@ class CallPipeline:
             try:
                 print(f"\n🔒 Pipeline Locked. Processing {len(audio_bytes)} bytes...")
                 
-                # --- STT ---
+                # 1. STT
                 text_ml = await self.stt.transcribe(audio_bytes, sample_rate=16000)
-                
-                if not text_ml or len(text_ml.strip()) < 2: 
-                    print("⚠️ Ignored empty STT.")
-                    return
+                if not text_ml or len(text_ml.strip()) < 2: return
 
                 log_message(call_id=self.ctx.call_id, speaker="user", raw_text=text_ml)
                 
-                # --- BRAIN (Tuple Return) ---
+                # --- ⚡ SMART FILLER LOGIC ---
+                # If text is long (> 15 chars) and NOT a greeting, play "wait.wav"
+                # This fills the silence while the GPU works.
+                is_greeting = len(text_ml) < 15 or text_ml.strip() in ["ഹലോ", "ഹായ്", "hello"]
+                
+                if not is_greeting:
+                    print("⏳ Long query detected. Playing filler audio...")
+                    # We use create_task so it plays in background/parallel if possible,
+                    # but since we are locked, we just await it to ensure user hears it first.
+                    await self.play_asset("wait")
+
+                # 2. BRAIN
                 response_type, content, log_text = await handle_llm(
                     self.ctx.call_id,
                     self.ctx.caller_id,
@@ -141,31 +150,27 @@ class CallPipeline:
                 
                 if not content: return
 
-                # --- EXECUTION SWITCH ---
+                # 3. EXECUTION
                 if response_type == "reflex":
-                    # FAST PATH: Play WAV file
+                    # If we already played 'wait', playing 'intro' might sound weird,
+                    # but 'reflex' usually happens on short texts where we skipped 'wait'.
                     await self.play_asset(content)
                 
                 else:
-                    # SLOW PATH: Generate TTS
+                    # TTS
                     print(f"⏳ Generating TTS for: {log_text[:20]}...")
                     audio_data_np = await asyncio.to_thread(self.tts.tell, content, play=False, sr=16000)
                     
-                    if audio_data_np is None or len(audio_data_np) == 0:
-                        return
+                    if audio_data_np is None: return
 
-                    # Convert float32 -> int16
                     audio_bytes_total = (audio_data_np * 32767).astype(np.int16).tobytes()
-                    
-                    # Stream
-                    print(f"📤 Streaming {len(audio_bytes_total)} bytes to phone...")
                     CHUNK_SIZE = 1280
                     for i in range(0, len(audio_bytes_total), CHUNK_SIZE):
                         chunk = audio_bytes_total[i:i+CHUNK_SIZE]
                         await self.send_to_twilio(chunk)
                         await asyncio.sleep(0.04)
-                
-                print("✅ Turn Complete. Unlocking...")
+
+                print("✅ Turn Complete.")
 
             except Exception as e:
                 logging.error(f"Pipeline Error: {e}")

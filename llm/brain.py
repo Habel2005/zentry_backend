@@ -14,6 +14,7 @@ from llm.translate import ml_to_en, en_to_ml
 from db.call_repo import log_message
 from db.ai_repo import log_processing_step, log_intent
 from db.snapshot_repo import get_snapshot
+from zentry_backend.db.client import init_supabase
 
 # Initialize Singletons
 engine = PhiEngine("models/llm/Phi-4-mini-instruct-Q5_K_M.gguf")
@@ -31,81 +32,98 @@ def init_globals(store_instance):
     global session_store
     session_store = store_instance
 
+# llm/brain.py
+# ... (Imports remain same) ...
+
 async def handle_llm(call_id, caller_id, phone, text_ml) -> tuple:
-    """
-    Returns: (response_type, content, text_for_db)
-    """
-    start_time = time.time()
     print(f"\n--- 🗣️ DETECTED (ML): {text_ml} ---")
 
-    # --- REFLEX 1: GREETING (Lat: <100ms) ---
+    # --- 1. REFLEX CHECK ---
     greetings = ["ഹലോ", "നമസ്കാരം", "hello", "hi"]
     cleaned = text_ml.lower().strip().replace("!", "")
-    
     if cleaned in greetings or len(cleaned) < 3:
-        # LOGGING: Even though it's a reflex, log it!
         log_message(call_id, "ai", "Hello! (Reflex)") 
         return ("reflex", "intro", "Hello! (Reflex)")
 
-    # --- STEP 1: Translate (Lat: ~200ms) ---
+    # --- 2. TRANSLATION ---
     t0 = time.time()
-    text_en = await cpu_scheduler.run(ml_to_en, text_ml)
-    lat_trans = int((time.time() - t0) * 1000)
+    try:
+        text_en = await cpu_scheduler.run(ml_to_en, text_ml)
+    except Exception as e:
+        print(f"❌ Translation Failed: {e}")
+        text_en = text_ml # Fallback to raw text
     
-    log_processing_step(call_id, "translate_ml_en", {"raw": text_ml}, {"trans": text_en}, latency_ms=lat_trans)
+    # 🔍 DEBUG: See what the brain actually hears
+    print(f"🔍 DEBUG [Trans]: '{text_en}'") 
+    
+    log_processing_step(call_id, "translate_ml_en", text_ml, text_en, latency_ms=int((time.time()-t0)*1000))
 
-    # --- REFLEX 2: NOISE/SILENCE ---
     if not text_en or len(text_en) < 2:
-        return ("reflex", "error", "[System: Audio Unclear]")
+        return ("reflex", "error", "Audio Unclear")
 
-    # --- STEP 2: Intent (Lat: ~50ms) ---
+    # --- 3. INTENT ---
     intent = await cpu_scheduler.run(detect_intent, text_en)
+    print(f"🔍 DEBUG [Intent]: {intent}")
     log_intent(call_id, intent)
+    
+    if intent in ["seat", "fee", "admission"]:
+        init_supabase().table("interest_signals").insert({
+            "call_id": call_id, "caller_id": caller_id, "quota_type": "general", "strength": "HIGH"
+        }).execute()
 
-    # --- STEP 3: RAG (Lat: ~100ms) ---
+    # --- 4. RAG SEARCH ---
     rag_topic = INTENT_TO_TOPIC.get(intent, None)
     rag_docs = []
     
     if rag_topic:
+        print(f"🔍 DEBUG [RAG]: Searching topic '{rag_topic}'...")
         rag_docs = await cpu_scheduler.run(rag.retrieve, text_en, rag_topic)
+    
     if not rag_docs:
+        print(f"🔍 DEBUG [RAG]: Fallback global search...")
         rag_docs = await cpu_scheduler.run(rag.retrieve, text_en, None)
 
-    # --- REFLEX 3: FALLBACK (Guardrail) ---
-    # If specific query but NO data, don't waste 4s generating a hallucination.
+    # 🔍 DEBUG: Print found docs to console
+    if rag_docs:
+        print(f"🔍 DEBUG [Docs Found]: {len(rag_docs)}")
+        print(f"📄 First Doc Snippet: {rag_docs[0][:100]}...")
+    else:
+        print("❌ DEBUG [Docs]: NO DOCUMENTS FOUND.")
+
+    # GUARDRAIL: If specific intent but no docs, fail early
     if not rag_docs and intent not in ["general", "eligibility"]:
+        print("🛡️ GUARDRAIL: No data -> Playing Fallback.")
         log_message(call_id, "ai", "I don't have that info. (Reflex)")
         return ("reflex", "fallback", "I don't have that info.")
 
-    # --- STEP 4: LLM Generation (Lat: ~3000ms) ---
-    t1 = time.time()
+    # --- 5. LLM GENERATION ---
     snapshot = get_snapshot(caller_id, intent)
-    
-    # Fetch history safely
     history = []
     if session_store:
         session = session_store.get_session(phone)
-        history = session.get("history", [])[-4:] # Keep context tight
+        history = session.get("history", [])[-4:]
 
     prompt = build_prompt(text_en, rag_docs, history, snapshot)
+    
+    # 🔍 DEBUG: Check what we are feeding the LLM
+    print(f"🔍 DEBUG [Prompt]:\n{prompt[-300:]}") # Print last 300 chars of prompt
+
     response_en = await gpu_scheduler.run(engine.generate, prompt)
-    
+    print(f"🔍 DEBUG [LLM Raw]: {response_en}")
+
     # Guardrails
-    # ... (Keep your existing guardrail logic) ...
+    safety_response = apply_guardrails(response_en, intent, rag_docs, shared_detector=None)
+    final_en = safety_response if safety_response else response_en
 
-    lat_llm = int((time.time() - t1) * 1000)
-    log_processing_step(call_id, "llm_generate", {"prompt_len": len(prompt)}, {"response": response_en}, latency_ms=lat_llm)
-
-    # --- STEP 5: Translate Back (Lat: ~200ms) ---
-    reply_ml = await cpu_scheduler.run(en_to_ml, response_en)
+    # --- 6. TRANSLATE BACK ---
+    reply_ml = await cpu_scheduler.run(en_to_ml, final_en)
+    print(f"🔍 DEBUG [Reply ML]: {reply_ml}")
     
-    # Update Session
     if session_store:
-        new_history = history + [{"role": "user", "text": text_en}, {"role": "ai", "text": response_en}]
+        new_history = history + [{"role": "user", "text": text_en}, {"role": "ai", "text": final_en}]
         session_store.update_session(phone, {"history": new_history})
         session_store.persist_later(phone)
 
-    # Final Database Log
     log_message(call_id, "ai", reply_ml)
     
     return ("text", reply_ml, reply_ml)
