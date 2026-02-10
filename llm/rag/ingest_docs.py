@@ -28,5 +28,5 @@ def ingest_document(path, source, topic):
         ]
     )
 
-    client.persist()
+    # REMOVED: client.persist() - ChromaDB now handles this automatically
     print(f"✅ Ingested {len(chunks)} chunks from {path}")
