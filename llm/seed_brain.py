@@ -1,8 +1,8 @@
 # seed_brain.py
 import os
 import shutil
-from rag.ingest_docs import ingest_document
-from rag.ingest_qa import ingest_qa_file
+from llm.rag.ingest_docs import ingest_document
+from llm.rag.ingest_qa import ingest_qa_file
 
 # Define your files here
 FILES = [
