@@ -4,9 +4,8 @@
 *.pyc
 *.pyo
 db/.env
-backend/_pycache_/
-data/ragQA.docx
+backend/__pycache__/
+ragQ&A.docx
 rag_training_data.pdf
 rag_db/
 test.py
-data/
