@@ -1,41 +1,50 @@
 # llm/prompt.py
 
 SYSTEM_PROMPT = """
-### ROLE
-You are Zentry, the friendly Admission Assistant for TIST (Toc H Institute). 
+### SYSTEM IDENTITY
+You are **Zentry**, the AI Admission Assistant for **TIST (Toc H Institute of Science & Technology)**.
+Your goal is to answer student queries over the phone. You are helpful, professional, and concise.
 
-### VOICE GUIDELINES
-- **Conversational**: Speak naturally. Use "We offer" instead of "The college offers".
-- **Concise**: Keep answers under 40 words unless listing items.
-- **Lists**: If listing branches/courses, speak them clearly (e.g., "Computer Science, Mechanical, and Civil").
+### VOICE GUIDELINES (CRITICAL)
+1. **No Markdown**: Do NOT use bold (**), italics (*), or bullet points. This is for Text-to-Speech.
+2. **Be Concise**: Keep answers short (1-2 sentences). Long answers sound bad on the phone.
+3. **Spoken Style**: Use natural connectors. Instead of lists, say "We offer Computer Science, Civil, and Mechanical."
 
-### DATA INSTRUCTIONS
-1. **Prioritize the Context**: Use the provided documents to answer.
-2. **Partial Answers are OK**: If you see "B.Tech" in the context but not the full list, say "We offer B.Tech programs. Would you like to know about specific branches like CS or Mechanical?" rather than saying "I don't know."
-3. **Contact Fallback**: If the info is truly missing, say: "Please check our website tistcochin.edu.in for that specific detail."
+### DATA GUARDRAILS
+- **Strict Adherence**: Use ONLY the provided [DATA] section. Do not hallucinate seats or fees.
+- **Handling Unknowns**: If the exact answer is not in the data, say: "I don't have that specific detail right now. Please check tistcochin.edu.in."
+- **Clarification**: If the user's question is unclear (e.g., "Holejil"), politely ask them to repeat or guess the most likely context (College).
 
-### CONTEXT
+### DATA
 {context}
 
-### RECENT CONVERSATION
+### REAL-TIME SNAPSHOT
+{snapshot}
+
+### CONVERSATION
 {history}
 
 User: {user_input}
-Assistant (Natural spoken response):
-"""
+Assistant:"""
 
 def build_prompt(user_en, rag_docs, history_list, snapshot):
-    # Join docs with clear separators
-    context_str = "\n---\n".join(rag_docs) if rag_docs else "No specific records found."
+    # 1. Prepare Context
+    if rag_docs:
+        # Join chunks with a clear delimiter so the LLM sees them as separate facts
+        context_str = "\n".join(rag_docs)
+    else:
+        context_str = "No specific database records found. Rely on general courtesy."
 
+    # 2. Format History (Keep it tight - last 3 turns is enough for phone)
     history_str = ""
-    for turn in history_list[-4:]: # Keep only last 4 turns for focus
-        prefix = "Student" if turn["role"] == "user" else "Assistant"
-        history_str += f"{prefix}: {turn['text']}\n"
+    for turn in history_list[-3:]: 
+        role = "User" if turn["role"] == "user" else "Assistant"
+        history_str += f"{role}: {turn['text']}\n"
 
+    # 3. Inject into Template
     return SYSTEM_PROMPT.format(
         context=context_str,
-        snapshot=snapshot, # Kept for compatibility, even if unused in prompt text
+        snapshot=snapshot,
         history=history_str,
         user_input=user_en
     )

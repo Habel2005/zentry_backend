@@ -4,7 +4,7 @@ class PhiEngine:
     def __init__(self, model_path):
         self.model = Llama(
             model_path=model_path,
-            n_ctx=2048,
+            n_ctx=4096,
             n_threads=4,      # Increased to 4 for i9; 2 is a bit slow
             n_gpu_layers=40,   # Keep 40 since you have a 3080 Ti
             verbose=False
@@ -13,8 +13,8 @@ class PhiEngine:
     def generate(self, prompt: str) -> str:
         out = self.model(
             prompt,
-            max_tokens=120,
-            temperature=0.4,
+            max_tokens=200,
+            temperature=0.7,
             top_p=0.9,
             repeat_penalty=1.1,
             # [CRITICAL FIX] Stop the AI from hallucinating the whole script
